@@ -41,6 +41,7 @@ import crc32 from './util/crc32';
 import { DfuError, ErrorCode } from './DfuError';
 
 const debug = require('debug')('dfu:transport');
+let _progress = require('cli-progress');
 
 /**
  * Implements the logic common to all transports, but not the transport itself.
@@ -54,6 +55,9 @@ export default class DfuAbstractTransport {
         if (this.constructor === DfuAbstractTransport) {
             throw new DfuError(ErrorCode.ERROR_CAN_NOT_INIT_ABSTRACT_TRANSPORT);
         }
+
+        this.start_time = undefined;
+        this.progress_bar = undefined;
     }
 
     // Restarts the DFU procedure by sending a create command of
@@ -90,6 +94,7 @@ export default class DfuAbstractTransport {
     // ("firmware image"/"data objects")
     sendPayload(type, bytes, resumeAtChunkBoundary = false) {
         debug(`Sending payload of type ${type}`);
+        this.start_time = process.hrtime();
         return this.selectObject(type).then(([offset, crcSoFar, chunkSize]) => {
             if (offset !== 0) {
                 debug(`Offset is not zero (${offset}). Checking if graceful continuation is possible.`);
@@ -155,12 +160,32 @@ export default class DfuAbstractTransport {
         return this.sendPayloadChunk(type, bytes, start, end, chunkSize, crcSoFar)
             .then(() => this.executeObject())
             .then(() => {
+                let end_time;
+                if (this.progress_bar === undefined) {
+                    this.progress_bar = new _progress.Bar({
+                        format: 'progress [{bar}] {percentage}% | Time Left: {eta}s | transmit {value}/{total} | Speed: {speed}'
+                    }, _progress.Presets.shades_grey);
+                    this.progress_bar.start(bytes.length, 0, {
+                        speed: "N/A"
+                    });
+                }
                 if (end >= bytes.length) {
                     debug(`Sent ${end} bytes, this payload type is finished`);
+                    end_time = process.hrtime(this.start_time);
+                    this.progress_bar.update(end, {
+                        speed: Math.round((end * 8)/((end_time[0] * 1e9 + end_time[1])/1000000), 2) + "kb/s"
+                    });
+                    this.progress_bar.stop();
+                    this.progress_bar = undefined;
                     return Promise.resolve();
                 }
                 // Send next chunk
                 debug(`Sent ${end} bytes, not finished yet (until ${bytes.length})`);
+                end_time = process.hrtime(this.start_time);
+
+                this.progress_bar.update(end, {
+                    speed: Math.round((end * 8)/((end_time[0] * 1e9 + end_time[1])/1000000) * 100) / 100 + " kb/s"
+                });
                 const nextEnd = Math.min(bytes.length, end + chunkSize);
 
                 return this.createObject(type, nextEnd - end)

@@ -36,7 +36,8 @@
     "rollup-plugin-node-globals": "^1.1.0",
     "rollup-plugin-node-resolve": "^3.0.0",
     "serialport": "^6.2.0",
-    "pcsclite": "^0.6.0"
+    "pcsclite": "^0.6.0",
+    "cli-progress": "^2.1.1"
   },
   "jest": {
     "testMatch": [
